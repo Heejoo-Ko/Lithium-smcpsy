@@ -1,6 +1,7 @@
-library(data.table);library(magrittr);library(DT);library(jstable);library(dplyr)
+library(data.table);library(magrittr);library(DT);library(jstable);library(dplyr);library(stats)
 
-setwd("D:/2020-2/Zarathu/Lithium")
+#setwd("~/ShinyApps/jihyunbaek/lithium")
+setwd("/home/heejooko/ShinyApps/lithium")
 lithium <- readRDS("lithium.RDS")
 
 
@@ -12,7 +13,7 @@ CKDEPI<-function(scr,age,sex){
   return(GFR)
 }
 
-df <- lithium$MEDI[, c("NO","Ã³¹æÀÏ","Ã³¹æ¸í","ÀÏ¼ö","È½¼ö")] 
+df <- lithium$MEDI[, c("NO","ì²˜ë°©ì¼","ì²˜ë°©ëª…","ì¼ìˆ˜","íšŸìˆ˜")] 
 names(df) <- c("NO","date","drug","day","times")
 df[, drug := ifelse(drug == "Lithium carbonate 300mg", "Lithium", "Valproate")]
 df <- unique(df)
@@ -22,34 +23,99 @@ df <- df[, .(totDay = sum(maxday, na.rm = T), qd = sum(qd, na.rm = T)/sum(maxday
 
 df.long <- dcast(df, NO ~ drug, value.var = c("totDay", "qd"))
 
-#left_join À§ÇØ¼­ NOÀÇ class¸¦ ¸ÂÃçÁÖ±â----------------------------------------
+#left_join ìœ„í•´ì„œ NOì˜ classë¥¼ ë§ì¶°ì£¼ê¸°----------------------------------------
 lithium$`clinical data`$NO <- lithium$`clinical data`$NO %>% as.numeric() %>% as.character()
 df.long$NO <- df.long$NO %>% as.character()
 lithium$`clinical data` <- merge(lithium$`clinical data`, df.long, by = "NO")
+## Dx group
+lithium$`clinical data`[, group_bipolar_schizoaffective_other := factor(ifelse(grepl("Bipolar|bipolar", lithium$`clinical data`$ì£¼ìƒë³‘ëª…), "Bipolar disorder",
+                                                                               ifelse(grepl("Schizoaffective|schizoaffective", lithium$`clinical data`$ì£¼ìƒë³‘ëª…), "Schizoaffective disorder", "vOthers")))]
 
 
-# Data inclusion - ÃÑÃ³¹æÀÏ¼ö 180ÀÏ ÃÊ°ú : tot = 4360----------------------------------------
-a <- lithium$`clinical data`[xor(is.na(totDay_Lithium),is.na(totDay_Valproate)) & (totDay_Lithium>180 | totDay_Valproate>180),
-                             .(NO,¼ºº°,»ı³â¿ùÀÏ,totDay_Lithium,totDay_Valproate,qd_Lithium,qd_Valproate, 
-                                   HTN = factor(as.integer(!is.na(`°íÇ÷¾Ğ ¿©ºÎ`))), DM = factor(as.integer(!is.na(`´ç´¢ ¿©ºÎ`))))]
+# Data inclusion----------------------------------------
+a <- lithium$`clinical data`[,
+                             .(NO,ì„±ë³„,ìƒë…„ì›”ì¼,totDay_Lithium,totDay_Valproate,qd_Lithium,qd_Valproate, 
+                               HTN = factor(as.integer(!is.na(`ê³ í˜ˆì•• ì—¬ë¶€`))), DM = factor(as.integer(!is.na(`ë‹¹ë‡¨ ì—¬ë¶€`))), group_bipolar_schizoaffective_other)]
+
+N_profile<-cbind("ì „ì²´",NA,nrow(a),NA,NA)
+
+## NO. list: TDM both
+NO.tdmboth <- lithium$`renal function & TDM`[, NO := as.character(NO)][`ì„¸ë¶€ê²€ì‚¬ëª…` %in% c("Lithium", "Valproic Acid")][, c("NO", "ì„¸ë¶€ê²€ì‚¬ëª…")][, unique(`ì„¸ë¶€ê²€ì‚¬ëª…`), by = "NO"][, names(which(table(NO) == 2))]
+
+a <- a[xor(is.na(totDay_Lithium),is.na(totDay_Valproate)),,][!(NO %in% c("2250", NO.tdmboth))]
+
+N_profile<-rbind(N_profile,cbind("Li+Valp combination",as.integer(N_profile[nrow(N_profile),3])-nrow(a),nrow(a),NA,NA))
+
+a[, drug := factor(ifelse(is.na(totDay_Lithium), 0, 1))]
+
+ICD_data <- readRDS("ICD_data.RDS")
+setnames(ICD_data,c("ê°œì¸ì •ë³´ë™ì˜ì—¬ë¶€","ì •ë ¬ìˆœì„œ"),c("Privacy Consent","NO"))
+ICD_data$NO<-ICD_data$NO %>% as.character()
+ICD_data<-ICD_data[`Privacy Consent`=="Y",,]
+
+a<-merge(a,ICD_data[,.(NO),],by="NO")
+N_profile<-rbind(N_profile,cbind("ê°œì¸ì •ë³´ì‚¬ìš©ë¯¸ë™ì˜",as.integer(N_profile[nrow(N_profile),3])-nrow(a),nrow(a),a[drug==0,.N,],a[drug==1,.N,]))
+
+a<-a[(totDay_Lithium>180 | totDay_Valproate>180),,]
+N_profile<-rbind(N_profile,cbind("ì´ì²˜ë°©ì¼ìˆ˜ 180ì¼ ì´ˆê³¼",as.integer(N_profile[nrow(N_profile),3])-nrow(a),nrow(a),a[drug==0,.N,],a[drug==1,.N,]))
+
 
 ## Date age----------------------------------------
 df <- lithium$MEDI[, NO := as.character(NO)][,.SD,]
-setnames(df,c("Ã³¹æÀÏ","ÇÔ·®´ÜÀ§Åõ¿©·®","ÀÏ¼ö"),c("date","dose","day"))
+setnames(df,c("ì²˜ë°©ì¼","í•¨ëŸ‰ë‹¨ìœ„íˆ¬ì—¬ëŸ‰","ì¼ìˆ˜"),c("date","dose","day"))
 
 data.main <- a %>% 
   merge(df[,.(firstPrescriptionDay=min(date, na.rm = T)), by = "NO"], by = "NO",all.x = T) %>% 
   merge(df[,.(lastPrescriptionDay=max(date, na.rm = T)), by = "NO"], by = "NO",all.x = T) %>% 
   merge(df[, .(avgDose_1day = sum(dose * day)/sum(day)), by = "NO"], by = "NO",all.x = T)
 
-data.main[, Age := floor(as.numeric(as.Date(firstPrescriptionDay) - as.Date(`»ı³â¿ùÀÏ`))/365.25)]
+data.main[, Age := floor(as.numeric(as.Date(firstPrescriptionDay) - as.Date(`ìƒë…„ì›”ì¼`))/365.25)]
 
+
+## NEW HTN/DM
+HTN_DM <- apply(ICD_data, 1, function(x){
+  HTN <- substr(x, 1, 3) %in% c(paste0("I", 10:16), 401:405)
+  HTN_which <- which(HTN == T)[1]
+  HTN_yn <- as.integer(!is.na(HTN_which))
+  HTN_date <- ifelse(HTN_yn == 0, NA, x[HTN_which - 1])
+  
+  DM <- (substr(x, 1, 3) %in% paste0("E", c("08", "09", 10:13))) | (substr(x, 1, 4) %in% paste0("250.", 0:9)) 
+  DM_which <- which(DM == T)[1]
+  DM_yn <- as.integer(!is.na(DM_which))
+  DM_date <- ifelse(DM_yn == 0, NA, x[DM_which - 1])
+  
+  return(c(HTN2 = HTN_yn, HTN_date = HTN_date, DM2 = DM_yn, DM_date = DM_date))
+}) %>% t %>% data.table
+
+HTN_DM$NO <- ICD_data$NO
+
+HTN_DM_info <- merge(data.main[, c("NO", "firstPrescriptionDay")], HTN_DM, by = "NO")
+HTN_DM_info[, `:=`(HTN = factor(as.integer(HTN2 == 1 & as.Date(HTN_date) <= as.Date(firstPrescriptionDay))),
+                   DM = factor(as.integer(DM2 == 1 & as.Date(DM_date) <= as.Date(firstPrescriptionDay))))]
+## merge
+data.main <- merge(data.main[, -c("HTN", "DM")], HTN_DM_info[, c("NO", "HTN", "DM")], by = "NO")
+
+
+W210216 <- readRDS("W210216.RDS")
+setnames(W210216,c("ê°œì¸ì •ë³´ë™ì˜ì—¬ë¶€","ì •ë ¬ìˆœì„œ"),c("Privacy Consent","NO"))
+W210216$NO<-W210216$NO %>% as.character()
+W210216<-W210216[`Privacy Consent`=="Y",,]
+W210216<-merge(W210216,data.main[,.(NO),],by="NO")
+
+W210216<-W210216[,alldiagnosis:=Reduce(paste,.SD),.SDcols=grep("ì§„ë‹¨ì½”ë“œ",colnames(W210216))][,c("NO","alldiagnosis"),]
+W210216<-W210216[alldiagnosis %like% "F",.SD,]
+
+data.main <- merge(data.main,W210216[,.(NO),],by="NO")
+N_profile<-rbind(N_profile,cbind("Fì½”ë“œ í¬í•¨",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
+
+data.main <- data.main[Age>=18,,]
+N_profile<-rbind(N_profile,cbind("ì²«ì²˜ë°©ì¼ê¸°ì¤€ ë§Œ 18ì„¸ ì´ìƒ",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
 
 # LithiumToxicity----------------------------------------
 
 df <- lithium$`renal function & TDM`[, NO := as.character(NO)][] %>% 
   merge(data.main[, .(NO, firstPrescriptionDay, lastPrescriptionDay)], by = "NO", all.x = T)
-setnames(df,c("¼¼ºÎ°Ë»ç¸í","°á°ú","½ÃÇàÀÏ½Ã"),c("test","result","testdate"))
+setnames(df,c("ì„¸ë¶€ê²€ì‚¬ëª…","ê²°ê³¼","ì‹œí–‰ì¼ì‹œ"),c("test","result","testdate"))
 
 data.main <- data.main %>% 
   merge(df[test=="Lithium" & as.numeric(result) > 1.0 & (testdate - firstPrescriptionDay >= 0) & (lastPrescriptionDay - testdate  >= 0),  .(LithiumToxicity1.0 = .N), by="NO"], by="NO", all.x = T) %>% 
@@ -59,19 +125,19 @@ data.main <- data.main %>%
   merge(df[test=="Valproic Acid" & (testdate - firstPrescriptionDay >= 0), .(avgTDM_Valproate = mean(as.numeric(result), na.rm = T)), by="NO"], by="NO", all.x = T)
 
 for (v in c("LithiumToxicity1.0", "LithiumToxicity0.8", "LithiumToxicity1.2")){
-  data.main[[v]] <- ifelse(is.na(data.main[[v]]), 0, data.main[[v]])
+  data.main[[v]] <- factor(ifelse(is.na(data.main[[v]]), 0, data.main[[v]]))
 }
-
 
 
 df<-lithium$`renal function & TDM`
 df$NO <- as.character(df$NO)
-df <- merge(df, lithium$`clinical data`[,.(NO,`¼ºº°`,`»ı³â¿ùÀÏ`),], by="NO", mult=all)
-df$`°á°ú`<- as.numeric(df$`°á°ú`) 
-df$½ÃÇàÀÏ½Ã <- as.Date(df$½ÃÇàÀÏ½Ã); df$»ı³â¿ùÀÏ <- as.Date(df$»ı³â¿ùÀÏ)
-setnames(df,c("¼¼ºÎ°Ë»ç¸í","½ÃÇàÀÏ½Ã","»ı³â¿ùÀÏ","°á°ú","¼ºº°"),c("test", "testDate", "birthDate", "result", "sex"))
+df <- merge(df, lithium$`clinical data`[,.(NO,`ì„±ë³„`,`ìƒë…„ì›”ì¼`),], by="NO", mult=all)
+df$`ê²°ê³¼`<- as.numeric(df$`ê²°ê³¼`) 
+df$ì‹œí–‰ì¼ì‹œ <- as.Date(df$ì‹œí–‰ì¼ì‹œ); df$ìƒë…„ì›”ì¼ <- as.Date(df$ìƒë…„ì›”ì¼)
+setnames(df,c("ì„¸ë¶€ê²€ì‚¬ëª…","ì‹œí–‰ì¼ì‹œ","ìƒë…„ì›”ì¼","ê²°ê³¼","ì„±ë³„"),c("test", "testDate", "birthDate", "result", "sex"))
 df[,age:=as.numeric(testDate-birthDate)/365.25]
 df[,eGFR:=ifelse(test=="Creatinine",CKDEPI(result,age,sex),NA),by=seq_len(nrow(df))]
+
 
 ## data for figure 1----------------------------------------
 data.f1 <- df[!is.na(eGFR),.(NO,testDate,eGFR)]
@@ -82,37 +148,68 @@ setnames(data.f1, "testDate", "date")
 
 data.main <- merge(data.main, df[eGFR < 60, .(eGFRbelow60Date = min(testDate)), by = "NO"], all.x = TRUE) %>% 
   merge(df[test == "Creatinine", .(testNum = .N), by="NO"], by="NO", all.x=TRUE) %>% 
-  .[!is.na(testNum) & (is.na(eGFRbelow60Date) | as.Date(firstPrescriptionDay) < as.Date(eGFRbelow60Date))] 
+  .[!is.na(testNum) & (is.na(eGFRbelow60Date) | as.Date(firstPrescriptionDay) < as.Date(eGFRbelow60Date))]
 
-data.main[, duration := ifelse(is.na(eGFRbelow60Date),as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay), as.Date(eGFRbelow60Date) - as.Date(firstPrescriptionDay))]
-data.main[, drug := factor(ifelse(is.na(totDay_Lithium), 0, 1))]
+data.main <- merge(data.main, df[eGFR < 30, .(eGFRbelow30Date = min(testDate)), by = "NO"], all.x = TRUE)
+data.main <- merge(data.main, df[eGFR < 15, .(eGFRbelow15Date = min(testDate)), by = "NO"], all.x = TRUE)
+
+data.main<-merge(data.main,data.f1[,.(lastTestDate=max(date)),by="NO"])
+data.main<-data.main[testNum>=2 & (as.Date(lastTestDate)-as.Date(firstPrescriptionDay))/365.25>=0.5,,]
+N_profile<-rbind(N_profile,cbind("ìµœì†Œ 2ê°œ ì´ìƒì˜ eGFR data\n(baseline & ìµœì†Œ 6ê°œì›” ì´ìƒì˜ post-baseline data)",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
+
+
+data.main[, duration60 := ifelse(is.na(eGFRbelow60Date),as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay), as.Date(eGFRbelow60Date) - as.Date(firstPrescriptionDay))]
 data.main[, eGFRbelow60 := factor(as.integer(!is.na(eGFRbelow60Date)))]
-data.main[, `:=`(year_FU= duration/365.25, totYear_Lithium = totDay_Lithium/365.25, totYear_Valproate = totDay_Valproate/365.25)]
-setnames(data.main, "¼ºº°", "Sex")
+data.main[, year_FU := duration60/365.25]
+
+data.main[, duration30 := ifelse(is.na(eGFRbelow30Date),as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay), as.Date(eGFRbelow30Date) - as.Date(firstPrescriptionDay))]
+data.main[, eGFRbelow30 := factor(as.integer(!is.na(eGFRbelow30Date)))]
+data.main[, year_FU_eGFRbelow30 := duration30/365.25]
+
+data.main[, duration15 := ifelse(is.na(eGFRbelow15Date),as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay), as.Date(eGFRbelow15Date) - as.Date(firstPrescriptionDay))]
+data.main[, eGFRbelow15 := factor(as.integer(!is.na(eGFRbelow15Date)))]
+data.main[, year_FU_eGFRbelow15 := duration15/365.25]
+
+
+data.main[, `:=`(totYear_Lithium = totDay_Lithium/365.25, totYear_Valproate = totDay_Valproate/365.25)]
+# duration Full
+data.main[, year_FU_full := as.numeric(as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay))/365.25]
+
+setnames(data.main, "ì„±ë³„", "Sex")
 data.main[, Sex := factor(Sex)]
 
-data.main <- data.main[, .SD, .SDcols = -c("»ı³â¿ùÀÏ", "firstPrescriptionDay", "lastPrescriptionDay", "eGFRbelow60Date", "duration", "totDay_Valproate", "totDay_Lithium","testNum")]
+data.main <- data.main[, .SD, .SDcols = -c("ìƒë…„ì›”ì¼", "firstPrescriptionDay", "lastPrescriptionDay", "duration60", "duration30", "duration15", "totDay_Valproate", "totDay_Lithium","testNum")]
+
+N_profile<-rbind(N_profile,cbind("ì²«ì²˜ë°©ì¼ê¸°ì¤€ ë§Œ 18ì„¸ ì´ìƒ",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
+
 
 ## Figure 1 data----------------------------------------
 
-# Ã³¹æ Á¤º¸
+# ì²˜ë°© ì •ë³´
 
-df <- lithium$MEDI[, c("NO","Ã³¹æÀÏ","Ã³¹æ¸í","ÀÏ¼ö","È½¼ö")]
+df <- lithium$MEDI[, c("NO","ì²˜ë°©ì¼","ì²˜ë°©ëª…","ì¼ìˆ˜","íšŸìˆ˜")]
 names(df) <- c("NO","date","drug","day","times")
 df[, drug := factor(ifelse(drug == "Lithium carbonate 300mg", 1, 0))]
 df <- unique(df)[, `:=`(NO = as.character(NO), date = as.Date(date))][]
 df <- df[, .(maxday = max(day, na.rm = T)), by=c("NO","date","drug")]
 
-# ÀÏ´Ü ÇÕÄ£ ÈÄ cumsum
+# ì¼ë‹¨ í•©ì¹œ í›„ cumsum
 data.f1 <- rbindlist(list(data.f1, df),use.names = TRUE, fill=TRUE)[order(NO,date)][, maxday:=ifelse(is.na(maxday),0,maxday)][]
 data.f1[, cumulativePrescriptionDay := cumsum(maxday),by=.(NO)]
 
 data.f1 <- data.f1[!is.na(eGFR), !c("maxday","drug")]
 data.f1 <- merge(data.f1, data.main[,.(NO,drug),], by="NO")
 
-## GFR change----------------------------------------
+## eGFR linear regression ---------------------------------------
 
-data.GFRchange<-data.f1[cumulativePrescriptionDay<365.25,.(year0GFR=mean(eGFR,na.rm=T)),by="NO"] %>%
+data.f1[,cumulativePrescriptionYear:=cumulativePrescriptionDay/365.25,]
+data.main<-merge(data.main,data.f1[,.(eGFRchange=coef(lm(eGFR~cumulativePrescriptionYear))[2]),by=NO])
+
+
+## Base eGFR, GFR change----------------------------------------
+
+data.GFRchange <- data.f1[cumulativePrescriptionDay<365.25,.(year0GFR=mean(eGFR,na.rm=T)),by="NO"] %>% 
+  merge(.,data.f1[, .(base_eGFR = ifelse(any(as.integer(cumulativePrescriptionDay) == 0), eGFR[last(which(cumulativePrescriptionDay == 0))], eGFR[1])), by ="NO"], by= "NO", all = T) %>% ## base eGFR
   merge(.,data.f1[(365.25*3)<cumulativePrescriptionDay & cumulativePrescriptionDay<(365.25*4),.(year3GFR=mean(eGFR,na.rm=T)),by="NO"],all=T) %>% 
   merge(.,data.f1[(365.25*5)<cumulativePrescriptionDay & cumulativePrescriptionDay<(365.25*6),.(year5GFR=mean(eGFR,na.rm=T)),by="NO"],all=T) %>% 
   merge(.,data.f1[(365.25*7)<cumulativePrescriptionDay & cumulativePrescriptionDay<(365.25*8),.(year7GFR=mean(eGFR,na.rm=T)),by="NO"],all=T) %>% 
@@ -123,33 +220,141 @@ data.GFRchange<-data.f1[cumulativePrescriptionDay<365.25,.(year0GFR=mean(eGFR,na
 
 data.main<-merge(data.main,data.GFRchange,all=T)
 
+data.main<-data.main[base_eGFR>=30,,]
+N_profile<-rbind(N_profile,cbind("baseline eGFR<30",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
+
 ## ----------------------------------------
 
-data.main <- data.main[, -c("NO")]  ## NO Á¦¿Ü
+ICD_data<-merge(ICD_data,data.main[,.(NO,drug),],by="NO")
+
+ICD_data<-ICD_data[,alldiagnosis:=Reduce(paste,.SD),.SDcols=grep("ì§„ë‹¨ì½”ë“œ",colnames(ICD_data))][,c("NO","drug","alldiagnosis"),]
+ICD_data<-ICD_data[!(alldiagnosis %like% "N0|N1" & !(alldiagnosis %like% "N09")),.SD,]
+N_profile<-rbind(N_profile,cbind("ICD N00-N08 or N10-N19",as.integer(N_profile[nrow(N_profile),3])-ICD_data[,.N,],ICD_data[,.N,],ICD_data[drug==0,.N,],ICD_data[drug==1,.N,]))
+
+ICD_data<-ICD_data[!(alldiagnosis %like% "T86.1"),.SD,]
+N_profile<-rbind(N_profile,cbind("ICD T86.1",as.integer(N_profile[nrow(N_profile),3])-ICD_data[,.N,],ICD_data[,.N,],ICD_data[drug==0,.N,],ICD_data[drug==1,.N,]))
+
+ICD_data<-ICD_data[!(alldiagnosis %like% "Z94.0"),.SD,]
+N_profile<-rbind(N_profile,cbind("ICD Z94.0",as.integer(N_profile[nrow(N_profile),3])-ICD_data[,.N,],ICD_data[,.N,],ICD_data[drug==0,.N,],ICD_data[drug==1,.N,]))
+
+data.main <- merge(data.main,ICD_data[,.(NO),],by="NO")
+
+## F code --------------------------------------
+
+W210226 <- readRDS("W210226.RDS")
+setnames(W210226,c("ê°œì¸ì •ë³´ë™ì˜ì—¬ë¶€","ì •ë ¬ìˆœì„œ","ì§„ë‹¨ì½”ë“œ"),c("Privacy Consent","NO","dcode"))
+W210226$NO<-W210226$NO %>% as.character()
+W210226<-W210226[`Privacy Consent`=="Y",,]
+W210226<-merge(W210226,data.main[,.(NO),],by="NO")
+W210226[, Fcode := factor(ifelse(dcode %like% "F2", "F20-29", ifelse(dcode %like% "F30|F31", "F30-F31", ifelse(dcode %like% "F32|F33", "F32-F33", "Others"))))]
+#W210226[, Fcode2 := substr(dcode, 1, 3)]
+
+#W210226[,schizo:=factor(as.integer((dcode %like% "F2"))),]
+#W210226[,mood:=factor(as.integer((dcode %like% "F3"))),]
+#W210226[,bipolar:=factor(as.integer(((dcode %like% "F30")|(dcode %like% "F31")))),]
+#W210226[,depressive:=factor(as.integer(((dcode %like% "F32")|(dcode %like% "F33")))),]
+
+data.main<-merge(data.main,W210226[,c("NO","Fcode"),],by="NO")
+
+## ë³µìš©ë…„ìˆ˜ë³„ nìˆ˜ ----------------------------------------
+
+Year_N<-data.frame(Year=0:26,
+                   Lithium_N=sapply(0:26,function(x) data.main[totYear_Lithium>x,.N,]),
+                   Valproate_N=sapply(0:26,function(x) data.main[totYear_Valproate>x,.N,]))
+
+
+## í•´ë‹¹ ì—°ì°¨ì— eGFR<60 ëœ nìˆ˜ ----------------------------------------
+
+data.f1<-merge(data.f1,data.main[,.(NO),],all.y=TRUE)
+
+data.f1<-merge(data.f1,data.main[,.(NO,base_eGFR),],by="NO",all.x=TRUE)
+data.f1<-data.f1[!(cumulativePrescriptionDay==0 & eGFR!=base_eGFR),,]
+data.f1<-data.f1[,-c("base_eGFR"),]
+
+#data.f1<-data.f1[eGFR>=30,,]
+
+colnames(N_profile)<-c("ì¡°ê±´","ì œì™¸","N","Valproate","Lithium")
+
+eGFRbelow60ratio<-
+  lapply(0:26,function(x){
+    NthYear<-unique(data.f1[(365.25*x)<cumulativePrescriptionDay & cumulativePrescriptionDay<(365.25*(x+1)),.(NthYeareGFR=mean(eGFR,na.rm=T),drug),by="NO"])
+    nth<-merge(NthYear[NthYeareGFR<60,.(below60=.N),by=drug],NthYear[,.N,by=drug],by="drug",all=TRUE)
+    if(NthYear[drug==1,.N,]==0){  nth<-rbind(nth,data.table(drug=1,below60="NA",N="NA"))  }
+    if(NthYear[drug==0,.N,]==0){  nth<-rbind(nth,data.table(drug=0,below60="NA",N="NA"))  }
+    nth[,yn:=paste(below60,N,sep = "/"),]  
+    nth<-data.table::transpose(nth[,4,])
+    return(nth)}) %>% Reduce(rbind,.)
+
+eGFRbelow60ratio<-rbind(
+  merge(data.main[base_eGFR<60,.(aa=.N),by=drug],data.main[,.(bb=.N),by=drug],by="drug",all=TRUE) %>% 
+    .[,.(cc=paste(aa,bb,sep="/")),by="drug"] %>% .[,.(cc),] %>% transpose,
+  eGFRbelow60ratio)
+
+eGFRbelow60ratio<-as.data.frame(eGFRbelow60ratio)
+colnames(eGFRbelow60ratio)<-c("Valproate","Lithium")
+rownames(eGFRbelow60ratio)<-c("baseline",unlist(lapply(0:26,function(x){paste0("Year ",x)})))
+
+## eGFR<60 ìµœì´ˆë°œìƒì¼ ì—°ì°¨ë³„ nìˆ˜
+
+findCumYear<-function(ID,eGFRbelow60Date){
+  return(data.f1[NO==ID & date==eGFRbelow60Date,cumulativePrescriptionYear])
+}
+
+dt<-unique(data.main[eGFRbelow60==1,.(yy=findCumYear(NO,eGFRbelow60Date),drug),by=c("NO","eGFRbelow60Date")])
+
+eGFRbelow60Years<-
+  lapply(0:20,function(x){
+    nth<-dt[x<=yy & yy<x+1,.N,by=drug]
+    if(dt[x<=yy & yy<x+1 & drug==0,.N,]==0){  nth<-rbind(nth,data.table(drug=0, N=0))  }
+    if(dt[x<=yy & yy<x+1 & drug==1,.N,]==0){  nth<-rbind(nth,data.table(drug=1, N=0))  }
+    nth<-data.table::transpose(nth[order(drug)])[2]
+  }) %>% Reduce(rbind,.)
+
+
+
+eGFRbelow60Years <- as.data.frame(eGFRbelow60Years)
+
+colnames(eGFRbelow60Years)<-c("Valproate","Lithium")
+rownames(eGFRbelow60Years)<-unlist(lapply(0:20,function(x){paste0("Year ",x)}))
+
+eGFRbelow60Years$Valproate <- as.integer(eGFRbelow60Years$Valproate)
+eGFRbelow60Years$Lithium <- as.integer(eGFRbelow60Years$Lithium)
+
+eGFRbelow60Years<-rbind(eGFRbelow60Years,
+                        data.frame(row.names="Sum",Valproate=sum(eGFRbelow60Years$Valproate),Lithium=sum(eGFRbelow60Years$Lithium)))
+
+## ----------------------------------------
+
+data.main <- data.main[, -c("NO", "lastTestDate", "eGFRbelow60Date","eGFRbelow30Date","eGFRbelow15Date")]  ## NO ì œì™¸
 
 label.main <- jstable::mk.lev(data.main)
 
 label.main[variable == "eGFRbelow60", `:=`(var_label = "eGFR < 60", val_label = c("No", "Yes"))]
+label.main[variable == "eGFRbelow30", `:=`(var_label = "eGFR < 30", val_label = c("No", "Yes"))]
+label.main[variable == "eGFRbelow15", `:=`(var_label = "eGFR < 15", val_label = c("No", "Yes"))]
 label.main[variable == "drug", `:=`(var_label = "Drug", val_label = c("Valproate", "Lithium"))]
 label.main[variable == "DM", `:=`(var_label = "DM", val_label = c("No", "Yes"))]
 label.main[variable == "HTN", `:=`(var_label = "HTN", val_label = c("No", "Yes"))]
-label.main[variable == "LithiumToxicity1.0", `:=`(var_label = "Lithium > 1.0 È½¼ö")]
-label.main[variable == "LithiumToxicity1.2", `:=`(var_label = "Lithium > 1.2 È½¼ö")]
-label.main[variable == "LithiumToxicity0.8", `:=`(var_label = "Lithium > 0.8 È½¼ö")]
+label.main[variable == "LithiumToxicity1.0", `:=`(var_label = "Lithium > 1.0 íšŸìˆ˜")]
+label.main[variable == "LithiumToxicity1.2", `:=`(var_label = "Lithium > 1.2 íšŸìˆ˜")]
+label.main[variable == "LithiumToxicity0.8", `:=`(var_label = "Lithium > 0.8 íšŸìˆ˜")]
 label.main[variable == "avgDose_1day", `:=`(var_label = "Average 1day dose")]
 label.main[variable == "totYear_Lithium", `:=`(var_label = "Cumulative Lithium year")]
 label.main[variable == "totYear_Valproate", `:=`(var_label = "Cumulative Valproate year")]
 label.main[variable == "qd_Lithium", `:=`(var_label = "Lithium QD proportion")]
 label.main[variable == "qd_Valproate", `:=`(var_label = "Valproate QD proportion")]
 
-label.main[variable == "year0GFR", `:=`(var_label = "º¹¿ë 1³â ÀÌ³» GFR")]
-label.main[variable == "year3GFR", `:=`(var_label = "º¹¿ë 3³âÂ÷ GFR")]
-label.main[variable == "year5GFR", `:=`(var_label = "º¹¿ë 5³âÂ÷ GFR")]
-label.main[variable == "year7GFR", `:=`(var_label = "º¹¿ë 7³âÂ÷ GFR")]
-label.main[variable == "year10GFR", `:=`(var_label = "º¹¿ë 10³âÂ÷ GFR")]
-label.main[variable == "year12GFR", `:=`(var_label = "º¹¿ë 12³âÂ÷ GFR")]
-label.main[variable == "year15GFR", `:=`(var_label = "º¹¿ë 15³âÂ÷ GFR")]
-label.main[variable == "year20GFR", `:=`(var_label = "º¹¿ë 20³âÂ÷ GFR")]
+label.main[variable == "year0GFR", `:=`(var_label = "ë³µìš© 1ë…„ ì´ë‚´ GFR")]
+label.main[variable == "year3GFR", `:=`(var_label = "ë³µìš© 3ë…„ì°¨ GFR")]
+label.main[variable == "year5GFR", `:=`(var_label = "ë³µìš© 5ë…„ì°¨ GFR")]
+label.main[variable == "year7GFR", `:=`(var_label = "ë³µìš© 7ë…„ì°¨ GFR")]
+label.main[variable == "year10GFR", `:=`(var_label = "ë³µìš© 10ë…„ì°¨ GFR")]
+label.main[variable == "year12GFR", `:=`(var_label = "ë³µìš© 12ë…„ì°¨ GFR")]
+label.main[variable == "year15GFR", `:=`(var_label = "ë³µìš© 15ë…„ì°¨ GFR")]
+label.main[variable == "year20GFR", `:=`(var_label = "ë³µìš© 20ë…„ì°¨ GFR")]
+label.main[variable == "Fcode", `:=`(var_label = "Primary psychiatric diagnoses, ICD-10")]
 
-## variable order: ¹Ì¸® ¸¸µé¾î³õÀº KM, cox ¸ğµâ¿ë
+## variable order : ë¯¸ë¦¬ ë§Œë“¤ì–´ë†“ì€ KM, cox ëª¨ë“ˆìš©
+
 varlist_kmcox <- list(variable = c("eGFRbelow60", "year_FU", "drug", setdiff(names(data.main), c("eGFRbelow60", "year_FU", "drug" ))))
+

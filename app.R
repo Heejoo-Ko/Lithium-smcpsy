@@ -1,12 +1,13 @@
-library(shiny);library(shinycustomloader);library(ggplot2);library(DT);library(survival);library(jsmodule);library(jstable)
+library(shiny);library(shinycustomloader);library(ggplot2);library(survival);library(jsmodule)
 source("global.R")
 nfactor.limit <- 20
 
 ui <- navbarPage("Lithium",
+                 theme = bslib::bs_theme(version = 4),
                  tabPanel("Data", icon = icon("table"),
                           sidebarLayout(
                             sidebarPanel(
-                              
+                              radioButtons("data_main", "Data", c("All", "Remove eGFR <60 within 1yrs", "Remove eGFR <60 within 3yrs"), "All", inline = T)
                             ),
                             mainPanel(
                               tabsetPanel(type = "pills",
@@ -17,9 +18,23 @@ ui <- navbarPage("Lithium",
                             )
                           )
                  ),
+                 tabPanel("N Profile",
+                          sidebarLayout(
+                            sidebarPanel(
+                              
+                            ),
+                            mainPanel(
+                              tabsetPanel(type = "pills",
+                                          tabPanel("Inclusion & Exclusion", withLoader(DTOutput("NProfile"), type="html", loader="loader6")),
+                                          tabPanel("year: N", withLoader(DTOutput("YearN"), type="html", loader="loader6")),
+                                          tabPanel("eGFR<60", withLoader(DTOutput("eGFRbelow60"), type="html", loader="loader6")))
+                            )
+                          )
+                 ),
                  tabPanel("Table 1", icon = icon("percentage"),
                           sidebarLayout(
                             sidebarPanel(
+                              radioButtons("sub_tb1", "Subgroup", c("All", "Lithium", "Valproate"), "All", inline = T),
                               tb1moduleUI("tb1")
                             ),
                             mainPanel(
@@ -32,6 +47,16 @@ ui <- navbarPage("Lithium",
                             )
                           )
                           
+                 ),
+                 tabPanel("Logistic regression",
+                          sidebarLayout(
+                            sidebarPanel(
+                              regressModuleUI("logistic")
+                            ),
+                            mainPanel(
+                              withLoader(DTOutput("logistictable"), type="html", loader="loader6")
+                            )
+                          )
                  ),
                  tabPanel("Figure 1", icon = icon("percentage"),
                           sidebarLayout(
@@ -77,8 +102,15 @@ ui <- navbarPage("Lithium",
 
 server <- function(input, output, session) {
   
+  data.main1 <- reactive({
+    switch(input$data_main, 
+           "All"= data.main,
+           "Remove eGFR <60 within 1yrs" = data.main[!(eGFRbelow60 == 1 & year_FU < 1)],
+           "Remove eGFR <60 within 3yrs" = data.main[!(eGFRbelow60 == 1 & year_FU < 3)])
+  })
+  
   output$data <- renderDT({
-    datatable(data.main, filter = "top", rownames = F, caption = "Data",
+    datatable(data.main1(), rownames = F, caption = "Data",
               options = c(opt.data("data"), list(scrollX = T)))
   })
   
@@ -88,8 +120,26 @@ server <- function(input, output, session) {
     )
   })
   
+  output$NProfile <- renderDT({
+    datatable(N_profile)
+  })
   
-  out_tb1 <- callModule(tb1module2, "tb1", data = reactive(data.main), data_label = reactive(label.main), data_varStruct = NULL, nfactor.limit = nfactor.limit)
+  output$YearN <- renderDT({
+    datatable(Year_N, rownames=FALSE)
+  })
+  
+  output$eGFRbelow60 <- renderDT({
+    datatable(eGFRbelow60ratio)
+  })
+  
+  data.tb1 <- reactive({
+    switch(input$sub_tb1, 
+           "All" = data.main1(),
+           "Lithium" = data.main1()[drug == 1],
+           "Valproate" = data.main1()[drug == 0])
+  })
+  
+  out_tb1 <- callModule(tb1module2, "tb1", data = data.tb1, data_label = reactive(label.main), data_varStruct = NULL, nfactor.limit = nfactor.limit)
   
   output$table1 <- renderDT({
     tb = out_tb1()$table
@@ -106,6 +156,20 @@ server <- function(input, output, session) {
     }
     return(out.tb1)
   })
+  
+  out_logistic <- callModule(logisticModule2, "logistic", data = data.main1, data_label = reactive(label.main), data_varStruct = reactive(varlist_kmcox), nfactor.limit = nfactor.limit, default.unires = F)
+  
+  output$logistictable <- renderDT({
+    hide = which(colnames(out_logistic()$table) == "sig")
+    datatable(out_logistic()$table, rownames=T, extensions = "Buttons", caption = out_logistic()$caption,
+              options = c(jstable::opt.tbreg(out_logistic()$caption),
+                          list(columnDefs = list(list(visible=FALSE, targets =hide))
+                          ),
+                          list(scrollX = TRUE)
+              )
+    ) %>% formatStyle("sig", target = 'row',backgroundColor = styleEqual("**", 'yellow'))
+  })
+  
   
   
   obj.fig1 <- reactive({
@@ -176,13 +240,13 @@ server <- function(input, output, session) {
       
     })
   
-  out_kaplan <- callModule(kaplanModule, "kaplan", data = reactive(data.main), data_label = reactive(label.main), data_varStruct = reactive(varlist_kmcox), nfactor.limit = nfactor.limit)
+  out_kaplan <- callModule(kaplanModule, "kaplan", data = data.main1, data_label = reactive(label.main), data_varStruct = reactive(varlist_kmcox), nfactor.limit = nfactor.limit)
   
   output$kaplan_plot <- renderPlot({
     print(out_kaplan())
   })
   
-  out_cox <- callModule(coxModule, "cox", data = reactive(data.main), data_label = reactive(label.main), data_varStruct = reactive(varlist_kmcox), default.unires = F, nfactor.limit = nfactor.limit)
+  out_cox <- callModule(coxModule, "cox", data = data.main1, data_label = reactive(label.main), data_varStruct = reactive(varlist_kmcox), default.unires = F, nfactor.limit = nfactor.limit)
   
   output$coxtable <- renderDT({
     hide <- which(colnames(out_cox()$table) == c("sig"))
@@ -194,7 +258,7 @@ server <- function(input, output, session) {
     )  %>% formatStyle("sig", target = 'row',backgroundColor = styleEqual("**", 'yellow'))
   })
   
- 
+  
 }
 
 
