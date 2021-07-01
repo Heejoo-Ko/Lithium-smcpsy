@@ -124,10 +124,13 @@ data.main <- data.main %>%
   merge(df[test=="Lithium" & (testdate - firstPrescriptionDay >= 0), .(avgTDM_Lithium = mean(as.numeric(result), na.rm = T)), by="NO"], by="NO", all.x = T) %>% 
   merge(df[test=="Valproic Acid" & (testdate - firstPrescriptionDay >= 0), .(avgTDM_Valproate = mean(as.numeric(result), na.rm = T)), by="NO"], by="NO", all.x = T)
 
-for (v in c("LithiumToxicity1.0", "LithiumToxicity0.8", "LithiumToxicity1.2")){
-  data.main[[v]] <- factor(ifelse(is.na(data.main[[v]]), 0, data.main[[v]]))
-}
+# for (v in c("LithiumToxicity1.0", "LithiumToxicity0.8", "LithiumToxicity1.2")){
+#   data.main[[v]] <- factor(ifelse(is.na(data.main[[v]]), 0, data.main[[v]]))
+# }
 
+for (v in c("LithiumToxicity1.0", "LithiumToxicity0.8", "LithiumToxicity1.2")){
+  data.main[[v]] <- factor(ifelse(is.na(data.main[[v]]), 0, 1))
+}
 
 df<-lithium$`renal function & TDM`
 df$NO <- as.character(df$NO)
@@ -220,8 +223,8 @@ data.GFRchange <- data.f1[cumulativePrescriptionDay<365.25,.(year0GFR=mean(eGFR,
 
 data.main<-merge(data.main,data.GFRchange,all=T)
 
-data.main<-data.main[base_eGFR>=30,,]
-N_profile<-rbind(N_profile,cbind("baseline eGFR<30",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
+data.main<-data.main[base_eGFR>=60,,]
+N_profile<-rbind(N_profile,cbind("baseline eGFR<60",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
 
 ## ----------------------------------------
 
@@ -335,9 +338,9 @@ label.main[variable == "eGFRbelow15", `:=`(var_label = "eGFR < 15", val_label = 
 label.main[variable == "drug", `:=`(var_label = "Drug", val_label = c("Valproate", "Lithium"))]
 label.main[variable == "DM", `:=`(var_label = "DM", val_label = c("No", "Yes"))]
 label.main[variable == "HTN", `:=`(var_label = "HTN", val_label = c("No", "Yes"))]
-label.main[variable == "LithiumToxicity1.0", `:=`(var_label = "Lithium > 1.0 횟수")]
-label.main[variable == "LithiumToxicity1.2", `:=`(var_label = "Lithium > 1.2 횟수")]
-label.main[variable == "LithiumToxicity0.8", `:=`(var_label = "Lithium > 0.8 횟수")]
+label.main[variable == "LithiumToxicity1.0", `:=`(var_label = "Lithium > 1.0 발생 여부", val_label = c("No", "Yes"))]
+label.main[variable == "LithiumToxicity1.2", `:=`(var_label = "Lithium > 1.2 발생 여부", val_label = c("No", "Yes"))]
+label.main[variable == "LithiumToxicity0.8", `:=`(var_label = "Lithium > 0.8 발생 여부", val_label = c("No", "Yes"))]
 label.main[variable == "avgDose_1day", `:=`(var_label = "Average 1day dose")]
 label.main[variable == "totYear_Lithium", `:=`(var_label = "Cumulative Lithium year")]
 label.main[variable == "totYear_Valproate", `:=`(var_label = "Cumulative Valproate year")]
