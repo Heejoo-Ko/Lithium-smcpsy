@@ -27,7 +27,9 @@ ui <- navbarPage("Lithium",
                               tabsetPanel(type = "pills",
                                           tabPanel("Inclusion & Exclusion", withLoader(DTOutput("NProfile"), type="html", loader="loader6")),
                                           tabPanel("year: N", withLoader(DTOutput("YearN"), type="html", loader="loader6")),
-                                          tabPanel("eGFR<60", withLoader(DTOutput("eGFRbelow60"), type="html", loader="loader6")))
+                                          tabPanel("eGFR<60", withLoader(DTOutput("eGFRbelow60"), type="html", loader="loader6")),
+                                          tabPanel("dcode", withLoader(verbatimTextOutput("tb_dcode"), type="html", loader="loader6")),
+                                          tabPanel("eGFR<60 within 3yrs", withLoader(verbatimTextOutput("tb_eGFRbelow60_3yrs"), type="html", loader="loader6")))
                             )
                           )
                  ),
@@ -64,15 +66,20 @@ ui <- navbarPage("Lithium",
                               checkboxInput("onefig1", "with 1 plot", F)
                             ),
                             mainPanel(
-                              withLoader(plotOutput("fig1"), type="html", loader="loader6"),
-                              h3("Download options"),
-                              wellPanel(
-                                uiOutput("downloadControls_fig1"),
-                                downloadButton("downloadButton_fig1", label = "Download the plot")
+                              tabsetPanel(type = "pills",
+                                          tabPanel("Main data",
+                                                   withLoader(plotOutput("fig1"), type="html", loader="loader6"),
+                                                   h3("Download options"),
+                                                   wellPanel(
+                                                     uiOutput("downloadControls_fig1"),
+                                                     downloadButton("downloadButton_fig1", label = "Download the plot")
+                                                   )),
+                                          tabPanel("Outlier",
+                                                   withLoader(plotOutput("fig1outlier"), type="html", loader="loader6")
+                                          )
                               )
                             )
                           )
-                          
                  ),
                  tabPanel("Kaplan-meier plot",
                           sidebarLayout(
@@ -130,6 +137,14 @@ server <- function(input, output, session) {
   
   output$eGFRbelow60 <- renderDT({
     datatable(eGFRbelow60ratio)
+  })
+  
+  output$tb_dcode <- renderPrint({
+    data.main1()[, table(drug, Fcode2)]
+  })
+  
+  output$tb_eGFRbelow60_3yrs <- renderPrint({
+    data.main[eGFRbelow60 == 1 & year_FU <= 3]$NO
   })
   
   data.tb1 <- reactive({
@@ -190,6 +205,24 @@ server <- function(input, output, session) {
   
   output$fig1 <- renderPlot({
     obj.fig1()
+  })
+  
+  
+  obj.fig1outlier <- reactive({
+    zz <- outlier.data.f1[, .SD]
+    zz$drug <- ifelse(zz$drug == 1, "Lithium", "Valproate")
+    
+    zz %>% 
+    ggplot()+
+      geom_line(aes(x=cumulativePrescriptionDay/365.25,y=eGFR, group=NO, color=drug), alpha=0.5)+
+      geom_point(aes(x=cumulativePrescriptionDay/365.25,y=eGFR, color=drug, fill=drug), size=1, alpha=0.1)+
+      theme_bw()+
+      xlab("Cumulative years")
+  })
+  
+  
+  output$fig1outlier <- renderPlot({
+    obj.fig1outlier()
   })
   
   

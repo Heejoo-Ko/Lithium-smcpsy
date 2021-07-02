@@ -1,7 +1,7 @@
 library(data.table);library(magrittr);library(DT);library(jstable);library(dplyr);library(stats)
 
 #setwd("~/ShinyApps/jihyunbaek/lithium")
-setwd("/home/heejooko/ShinyApps/lithium")
+#setwd("/home/heejooko/ShinyApps/lithium")
 lithium <- readRDS("lithium.RDS")
 
 
@@ -330,6 +330,9 @@ eGFRbelow60Years<-rbind(eGFRbelow60Years,
 
 data.main <- data.main[, -c("NO", "lastTestDate", "eGFRbelow60Date","eGFRbelow30Date","eGFRbelow15Date")]  ## NO 제외
 
+outlierNO<-data.f1[eGFR<60,NO] %>% unique
+outlier.data.f1<-data.f1[NO %in% outlierNO,,]
+
 label.main <- jstable::mk.lev(data.main)
 
 label.main[variable == "eGFRbelow60", `:=`(var_label = "eGFR < 60", val_label = c("No", "Yes"))]
@@ -360,4 +363,3 @@ label.main[variable == "Fcode", `:=`(var_label = "Primary psychiatric diagnoses,
 ## variable order : 미리 만들어놓은 KM, cox 모듈용
 
 varlist_kmcox <- list(variable = c("eGFRbelow60", "year_FU", "drug", setdiff(names(data.main), c("eGFRbelow60", "year_FU", "drug" ))))
-
