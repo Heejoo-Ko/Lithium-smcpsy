@@ -1,7 +1,7 @@
 library(data.table);library(magrittr);library(DT);library(jstable);library(dplyr);library(stats)
 
 #setwd("~/ShinyApps/jihyunbaek/lithium")
-#setwd("/home/heejooko/ShinyApps/lithium")
+setwd("/home/heejooko/ShinyApps/lithium")
 lithium <- readRDS("lithium.RDS")
 
 
@@ -103,10 +103,10 @@ W210216<-W210216[`Privacy Consent`=="Y",,]
 W210216<-merge(W210216,data.main[,.(NO),],by="NO")
 
 W210216<-W210216[,alldiagnosis:=Reduce(paste,.SD),.SDcols=grep("진단코드",colnames(W210216))][,c("NO","alldiagnosis"),]
-W210216<-W210216[alldiagnosis %like% "F",.SD,]
+W210216<-W210216[alldiagnosis %like% "F2" | alldiagnosis %like% "F30" | alldiagnosis %like% "F31" | alldiagnosis %like% "F32" | alldiagnosis %like% "F33",.SD,]
 
 data.main <- merge(data.main,W210216[,.(NO),],by="NO")
-N_profile<-rbind(N_profile,cbind("F코드 포함",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
+N_profile<-rbind(N_profile,cbind("주진단코드 F20~F33",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
 
 data.main <- data.main[Age>=18,,]
 N_profile<-rbind(N_profile,cbind("첫처방일기준 만 18세 이상",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
@@ -156,23 +156,65 @@ data.main <- merge(data.main, df[eGFR < 60, .(eGFRbelow60Date = min(testDate)), 
 data.main <- merge(data.main, df[eGFR < 30, .(eGFRbelow30Date = min(testDate)), by = "NO"], all.x = TRUE)
 data.main <- merge(data.main, df[eGFR < 15, .(eGFRbelow15Date = min(testDate)), by = "NO"], all.x = TRUE)
 
-data.main<-merge(data.main,data.f1[,.(lastTestDate=max(date)),by="NO"])
-data.main<-data.main[testNum>=2 & (as.Date(lastTestDate)-as.Date(firstPrescriptionDay))/365.25>=0.5,,]
-N_profile<-rbind(N_profile,cbind("최소 2개 이상의 eGFR data\n(baseline & 최소 6개월 이상의 post-baseline data)",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
+
+# baseline에서 6개월 / 30일 이상 데이터
+
+data.f1<-merge(data.f1,data.f1[,.(baselineDate=min(date)),by="NO"],by="NO")
+data.f1[,dateDiff:=(date-baselineDate),]
+data.f1[dateDiff>=180,firstPostBaselineDate:=min(date),by="NO"]
+data.f1[,dateDiff2:=(date-firstPostBaselineDate)]
+data.f1[dateDiff2>=30,secondPostBaselineDate:=min(date),by="NO"]
+
+data.main<-merge(data.main,data.f1[,.(PostBaselineDate1=max(firstPostBaselineDate,na.rm=T),PostBaselineDate2=max(secondPostBaselineDate,na.rm=T)),by="NO"],by="NO")
+data.main<-data.main[!is.na(as.POSIXlt(PostBaselineDate1)) & !is.na(as.POSIXlt(PostBaselineDate2))]
+N_profile<-rbind(N_profile,cbind("baseline + 2개 이상의 post-baseline eGFR (post-baseline 두 eGFR 사이 최소 30일 이상 기간)",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
 
 
-data.main[, duration60 := ifelse(is.na(eGFRbelow60Date),as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay), as.Date(eGFRbelow60Date) - as.Date(firstPrescriptionDay))]
-data.main[, eGFRbelow60 := factor(as.integer(!is.na(eGFRbelow60Date)))]
+# 맨 뒤<60 && 30일 차이나는 그 다음 맨 뒤<60 --> eGFRbelow60
+
+data.f1[,lastTestDate:=max(date,na.rm=T),by="NO"]
+data.f1[,dateDiff_fromlast:=(lastTestDate-date),]
+
+data.f1[dateDiff_fromlast>=30,secondLastTestDate:=max(date),by="NO"]
+
+# data.f1[date==secondLastTestDate,.N,by="NO"][(N)!=1,]  같은 날짜의 lastTestDate이나 secondLastTestDate에 측정값 여러개인 것이 있어서 mean 취함
+# data.f1[NO=="7934"]
+
+library(zoo)
+
+df.lastEGFRs<-merge(data.f1[date==lastTestDate,.(lasteGFR=mean(eGFR,na.rm=T), lastTestDate),by="NO"],data.f1[date==secondLastTestDate,.(secondLasteGFR=mean(eGFR,na.rm=T), secondLastTestDate),by="NO"],by="NO",all=T)
+df.lastEGFRs<-df.lastEGFRs[!duplicated(df.lastEGFRs$NO)]
+
+data.main<-merge(data.main,df.lastEGFRs,by="NO")
+
+data.main[,eGFRbelow60:=factor(ifelse(lasteGFR<60 & secondLasteGFR<60,1,0)),]
+data.main[,eGFRbelow60Date:=ifelse(eGFRbelow60==1,as.Date(lastTestDate),NA)]
+data.main[, duration60 := ifelse(eGFRbelow60==0,as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay), as.Date(eGFRbelow60Date) - as.Date(firstPrescriptionDay))]
 data.main[, year_FU := duration60/365.25]
 
-data.main[, duration30 := ifelse(is.na(eGFRbelow30Date),as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay), as.Date(eGFRbelow30Date) - as.Date(firstPrescriptionDay))]
-data.main[, eGFRbelow30 := factor(as.integer(!is.na(eGFRbelow30Date)))]
+data.main[,eGFRbelow30:=factor(ifelse(lasteGFR<30 & secondLasteGFR<30,1,0)),]
+data.main[,eGFRbelow30Date:=ifelse(eGFRbelow30==1,as.Date(lastTestDate),NA)]
+data.main[, duration30 := ifelse(eGFRbelow30==0,as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay), as.Date(eGFRbelow30Date) - as.Date(firstPrescriptionDay))]
 data.main[, year_FU_eGFRbelow30 := duration30/365.25]
 
-data.main[, duration15 := ifelse(is.na(eGFRbelow15Date),as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay), as.Date(eGFRbelow15Date) - as.Date(firstPrescriptionDay))]
-data.main[, eGFRbelow15 := factor(as.integer(!is.na(eGFRbelow15Date)))]
+data.main[,eGFRbelow15:=factor(ifelse(lasteGFR<15 & secondLasteGFR<15,1,0)),]
+data.main[,eGFRbelow15Date:=ifelse(eGFRbelow15==1,as.Date(lastTestDate),NA)]
+data.main[, duration15 := ifelse(eGFRbelow15==0,as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay), as.Date(eGFRbelow15Date) - as.Date(firstPrescriptionDay))]
 data.main[, year_FU_eGFRbelow15 := duration15/365.25]
 
+data.f1<-data.f1[,-c("baselineDate","dateDiff","firstPostBaselineDate","dateDiff2","secondPostBaselineDate","lastTestDate","dateDiff_fromlast","secondLastTestDate")]
+
+# data.main[, duration60 := ifelse(is.na(eGFRbelow60Date),as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay), as.Date(eGFRbelow60Date) - as.Date(firstPrescriptionDay))]
+# data.main[, eGFRbelow60 := factor(as.integer(!is.na(eGFRbelow60Date)))]
+# data.main[, year_FU := duration60/365.25]
+# 
+# data.main[, duration30 := ifelse(is.na(eGFRbelow30Date),as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay), as.Date(eGFRbelow30Date) - as.Date(firstPrescriptionDay))]
+# data.main[, eGFRbelow30 := factor(as.integer(!is.na(eGFRbelow30Date)))]
+# data.main[, year_FU_eGFRbelow30 := duration30/365.25]
+# 
+# data.main[, duration15 := ifelse(is.na(eGFRbelow15Date),as.Date(lastPrescriptionDay) - as.Date(firstPrescriptionDay), as.Date(eGFRbelow15Date) - as.Date(firstPrescriptionDay))]
+# data.main[, eGFRbelow15 := factor(as.integer(!is.na(eGFRbelow15Date)))]
+# data.main[, year_FU_eGFRbelow15 := duration15/365.25]
 
 data.main[, `:=`(totYear_Lithium = totDay_Lithium/365.25, totYear_Valproate = totDay_Valproate/365.25)]
 # duration Full
@@ -182,9 +224,6 @@ setnames(data.main, "성별", "Sex")
 data.main[, Sex := factor(Sex)]
 
 data.main <- data.main[, .SD, .SDcols = -c("생년월일", "firstPrescriptionDay", "lastPrescriptionDay", "duration60", "duration30", "duration15", "totDay_Valproate", "totDay_Lithium","testNum")]
-
-N_profile<-rbind(N_profile,cbind("첫처방일기준 만 18세 이상",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
-
 
 ## Figure 1 data----------------------------------------
 
@@ -250,14 +289,14 @@ W210226$NO<-W210226$NO %>% as.character()
 W210226<-W210226[`Privacy Consent`=="Y",,]
 W210226<-merge(W210226,data.main[,.(NO),],by="NO")
 W210226[, Fcode := factor(ifelse(dcode %like% "F2", "F20-29", ifelse(dcode %like% "F30|F31", "F30-F31", ifelse(dcode %like% "F32|F33", "F32-F33", "Others"))))]
-#W210226[, Fcode2 := substr(dcode, 1, 3)]
+W210226[, Fcode2 := substr(dcode, 1, 3)]
 
 #W210226[,schizo:=factor(as.integer((dcode %like% "F2"))),]
 #W210226[,mood:=factor(as.integer((dcode %like% "F3"))),]
 #W210226[,bipolar:=factor(as.integer(((dcode %like% "F30")|(dcode %like% "F31")))),]
 #W210226[,depressive:=factor(as.integer(((dcode %like% "F32")|(dcode %like% "F33")))),]
 
-data.main<-merge(data.main,W210226[,c("NO","Fcode"),],by="NO")
+data.main<-merge(data.main,W210226[,c("NO","Fcode", "Fcode2"),],by="NO")
 
 ## 복용년수별 n수 ----------------------------------------
 
@@ -328,16 +367,17 @@ eGFRbelow60Years<-rbind(eGFRbelow60Years,
 
 ## ----------------------------------------
 
-data.main <- data.main[, -c("NO", "lastTestDate", "eGFRbelow60Date","eGFRbelow30Date","eGFRbelow15Date")]  ## NO 제외
+data.main <- data.main[, -c("NO","eGFRbelow60Date","eGFRbelow30Date","eGFRbelow15Date","lastTestDate","secondLastTestDate")]  ## NO 제외
 
 outlierNO<-data.f1[eGFR<60,NO] %>% unique
 outlier.data.f1<-data.f1[NO %in% outlierNO,,]
+
 
 label.main <- jstable::mk.lev(data.main)
 
 label.main[variable == "eGFRbelow60", `:=`(var_label = "eGFR < 60", val_label = c("No", "Yes"))]
 label.main[variable == "eGFRbelow30", `:=`(var_label = "eGFR < 30", val_label = c("No", "Yes"))]
-label.main[variable == "eGFRbelow15", `:=`(var_label = "eGFR < 15", val_label = c("No", "Yes"))]
+# label.main[variable == "eGFRbelow15", `:=`(var_label = "eGFR < 15", val_label = c("No", "Yes"))] ## eGFRbelow15 Yes 없어서 에러나서 지움
 label.main[variable == "drug", `:=`(var_label = "Drug", val_label = c("Valproate", "Lithium"))]
 label.main[variable == "DM", `:=`(var_label = "DM", val_label = c("No", "Yes"))]
 label.main[variable == "HTN", `:=`(var_label = "HTN", val_label = c("No", "Yes"))]
@@ -362,4 +402,4 @@ label.main[variable == "Fcode", `:=`(var_label = "Primary psychiatric diagnoses,
 
 ## variable order : 미리 만들어놓은 KM, cox 모듈용
 
-varlist_kmcox <- list(variable = c("eGFRbelow60", "year_FU", "drug", setdiff(names(data.main), c("eGFRbelow60", "year_FU", "drug" ))))
+varlist_kmcox <- list(variable = c("eGFRbelow60", "year_FU", "drug", setdiff(names(data.main), c("eGFRbelow60", "year_FU", "drug", "NO" ))))
