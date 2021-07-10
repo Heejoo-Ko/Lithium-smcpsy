@@ -1,6 +1,6 @@
 library(data.table);library(magrittr);library(DT);library(jstable);library(dplyr);library(stats)
 
-#setwd("~/ShinyApps/jihyunbaek/lithium")
+# setwd("~/ShinyApps/jihyunbaek/lithium")
 setwd("/home/heejooko/ShinyApps/lithium")
 lithium <- readRDS("lithium.RDS")
 
@@ -96,21 +96,35 @@ HTN_DM_info[, `:=`(HTN = factor(as.integer(HTN2 == 1 & as.Date(HTN_date) <= as.D
 data.main <- merge(data.main[, -c("HTN", "DM")], HTN_DM_info[, c("NO", "HTN", "DM")], by = "NO")
 
 
-W210216 <- readRDS("W210216.RDS")
-setnames(W210216,c("개인정보동의여부","정렬순서"),c("Privacy Consent","NO"))
-W210216$NO<-W210216$NO %>% as.character()
-W210216<-W210216[`Privacy Consent`=="Y",,]
-W210216<-merge(W210216,data.main[,.(NO),],by="NO")
+## F code --------------------------------------
 
-W210216<-W210216[,alldiagnosis:=Reduce(paste,.SD),.SDcols=grep("진단코드",colnames(W210216))][,c("NO","alldiagnosis"),]
-W210216<-W210216[alldiagnosis %like% "F2" | alldiagnosis %like% "F30" | alldiagnosis %like% "F31" | alldiagnosis %like% "F32" | alldiagnosis %like% "F33",.SD,]
+W210226 <- readRDS("W210226.RDS")
+setnames(W210226,c("개인정보동의여부","정렬순서","진단코드"),c("Privacy Consent","NO","dcode"))
+W210226$NO<-W210226$NO %>% as.character()
+W210226<-W210226[`Privacy Consent`=="Y",,]
+W210226<-merge(W210226,data.main[,.(NO),],by="NO")
 
-data.main <- merge(data.main,W210216[,.(NO),],by="NO")
+W210226<-W210226[dcode %like% "F2" | dcode %like% "F30" | dcode %like% "F31" | dcode %like% "F32" | dcode %like% "F33",.SD,]
+
+
+data.main <- merge(data.main,W210226[,.(NO),],by="NO")
 N_profile<-rbind(N_profile,cbind("주진단코드 F20~F33",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
+
+W210226[, Fcode := factor(ifelse(dcode %like% "F2", "F20-29", ifelse(dcode %like% "F30|F31", "F30-F31", ifelse(dcode %like% "F32|F33", "F32-F33", "Others"))))]
+W210226[, Fcode2 := substr(dcode, 1, 3)]
 
 data.main <- data.main[Age>=18,,]
 N_profile<-rbind(N_profile,cbind("첫처방일기준 만 18세 이상",as.integer(N_profile[nrow(N_profile),3])-data.main[,.N,],data.main[,.N,],data.main[drug==0,.N,],data.main[drug==1,.N,]))
 
+
+#W210226[,schizo:=factor(as.integer((dcode %like% "F2"))),]
+#W210226[,mood:=factor(as.integer((dcode %like% "F3"))),]
+#W210226[,bipolar:=factor(as.integer(((dcode %like% "F30")|(dcode %like% "F31")))),]
+#W210226[,depressive:=factor(as.integer(((dcode %like% "F32")|(dcode %like% "F33")))),]
+
+
+
+data.main<-merge(data.main,W210226[,c("NO","Fcode", "Fcode2"),],by="NO")
 # LithiumToxicity----------------------------------------
 
 df <- lithium$`renal function & TDM`[, NO := as.character(NO)][] %>% 
@@ -281,23 +295,6 @@ N_profile<-rbind(N_profile,cbind("ICD Z94.0",as.integer(N_profile[nrow(N_profile
 
 data.main <- merge(data.main,ICD_data[,.(NO),],by="NO")
 
-## F code --------------------------------------
-
-W210226 <- readRDS("W210226.RDS")
-setnames(W210226,c("개인정보동의여부","정렬순서","진단코드"),c("Privacy Consent","NO","dcode"))
-W210226$NO<-W210226$NO %>% as.character()
-W210226<-W210226[`Privacy Consent`=="Y",,]
-W210226<-merge(W210226,data.main[,.(NO),],by="NO")
-W210226[, Fcode := factor(ifelse(dcode %like% "F2", "F20-29", ifelse(dcode %like% "F30|F31", "F30-F31", ifelse(dcode %like% "F32|F33", "F32-F33", "Others"))))]
-W210226[, Fcode2 := substr(dcode, 1, 3)]
-
-#W210226[,schizo:=factor(as.integer((dcode %like% "F2"))),]
-#W210226[,mood:=factor(as.integer((dcode %like% "F3"))),]
-#W210226[,bipolar:=factor(as.integer(((dcode %like% "F30")|(dcode %like% "F31")))),]
-#W210226[,depressive:=factor(as.integer(((dcode %like% "F32")|(dcode %like% "F33")))),]
-
-data.main<-merge(data.main,W210226[,c("NO","Fcode", "Fcode2"),],by="NO")
-
 ## 복용년수별 n수 ----------------------------------------
 
 Year_N<-data.frame(Year=0:26,
@@ -367,7 +364,8 @@ eGFRbelow60Years<-rbind(eGFRbelow60Years,
 
 ## ----------------------------------------
 
-data.main <- data.main[, -c("NO","eGFRbelow60Date","eGFRbelow30Date","eGFRbelow15Date","lastTestDate","secondLastTestDate")]  ## NO 제외
+data.main <- data.main[, -c("eGFRbelow60Date","eGFRbelow30Date","eGFRbelow15Date","lastTestDate","secondLastTestDate", "PostBaselineDate1", "PostBaselineDate2")]  ## NO 제외
+data.main$eGFR_last_minus_base <- data.main$lasteGFR - data.main$base_eGFR
 
 outlierNO<-data.f1[eGFR<60,NO] %>% unique
 outlier.data.f1<-data.f1[NO %in% outlierNO,,]
@@ -376,7 +374,7 @@ outlier.data.f1<-data.f1[NO %in% outlierNO,,]
 label.main <- jstable::mk.lev(data.main)
 
 label.main[variable == "eGFRbelow60", `:=`(var_label = "eGFR < 60", val_label = c("No", "Yes"))]
-label.main[variable == "eGFRbelow30", `:=`(var_label = "eGFR < 30", val_label = c("No", "Yes"))]
+# label.main[variable == "eGFRbelow30", `:=`(var_label = "eGFR < 30", val_label = c("No", "Yes"))]
 # label.main[variable == "eGFRbelow15", `:=`(var_label = "eGFR < 15", val_label = c("No", "Yes"))] ## eGFRbelow15 Yes 없어서 에러나서 지움
 label.main[variable == "drug", `:=`(var_label = "Drug", val_label = c("Valproate", "Lithium"))]
 label.main[variable == "DM", `:=`(var_label = "DM", val_label = c("No", "Yes"))]
